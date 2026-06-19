@@ -15,14 +15,14 @@ def resetar_app():
     st.session_state["file_uploader_key"] += 1
 
 def gerar_pdf(alertas, info_pregao, info_emissao):
-    """Gera um arquivo PDF formatado com destaques visuais coloridos."""
+    """Gera um arquivo PDF formatado com destaques visuais ou mensagem de sucesso."""
     pdf = FPDF(orientation="L", unit="mm", format="A4") # Formato Paisagem
     pdf.add_page()
     
-    # 1. Adiciona a Logo no PDF se ela existir no repositório
+    # 1. Adiciona a Logo no PDF se ela existir
     if os.path.exists("logo_drogafonte (1).png"):
         pdf.image("logo_drogafonte (1).png", x=10, y=10, w=40)
-        pdf.ln(14) # Espaço para não sobrepor o título
+        pdf.ln(14)
     else:
         pdf.ln(5)
         
@@ -38,9 +38,17 @@ def gerar_pdf(alertas, info_pregao, info_emissao):
     pdf.cell(0, 6, safe_emissao, align="C", new_x="LMARGIN", new_y="NEXT")
     pdf.ln(5)
     
-    # Cabeçalho da Tabela
+    # Se não houver alertas, imprime a mensagem de sucesso
+    if not alertas:
+        pdf.ln(15)
+        pdf.set_font("helvetica", "B", 12)
+        # Emojis não são suportados nativamente no helvetica do fpdf, então usamos um texto formal
+        msg_sucesso = "STATUS: Tudo certo! Nenhum alerta de valor ou desconto encontrado neste arquivo."
+        pdf.cell(0, 10, msg_sucesso, align="C", new_x="LMARGIN", new_y="NEXT")
+        return bytes(pdf.output())
+
+    # --- Se houver alertas, gera a tabela ---
     pdf.set_font("helvetica", "B", 9)
-    # Definição das cores do cabeçalho (Cinza Escuro)
     pdf.set_fill_color(230, 230, 230)
     
     col_widths = [15, 35, 105, 25, 25, 25, 40]
@@ -50,24 +58,18 @@ def gerar_pdf(alertas, info_pregao, info_emissao):
         pdf.cell(col_widths[i], 8, h, border=1, align="C", fill=True)
     pdf.ln()
     
-    # Definição das Cores de Destaque (RGB)
-    bg_vermelho_linha = (255, 214, 214)  # Linha toda para Lance > Valor Inicial
-    bg_amarelo_lance = (255, 243, 205)   # Célula do lance para Desconto > 40%
+    bg_vermelho_linha = (255, 214, 214)
+    bg_amarelo_lance = (255, 243, 205)
     
-    # Linhas da Tabela
     for alerta in alertas:
         is_acima = alerta["Tipo de Alerta"] == "ACIMA DO VALOR"
-        
-        # Define se a linha inteira terá preenchimento de fundo
-        if is_acima:
-            pdf.set_fill_color(*bg_vermelho_linha)
-            fill_row = True
-        else:
-            fill_row = False
+        fill_row = True if is_acima else False
             
-        # Fonte padrão para as células normais
         pdf.set_font("helvetica", "", 8)
         
+        if is_acima:
+            pdf.set_fill_color(*bg_vermelho_linha)
+            
         pdf.cell(col_widths[0], 8, str(alerta["Item"]), border=1, align="C", fill=fill_row)
         
         tipo_alerta_safe = alerta["Tipo de Alerta"].encode('latin-1', 'replace').decode('latin-1')
@@ -81,21 +83,20 @@ def gerar_pdf(alertas, info_pregao, info_emissao):
         pdf.cell(col_widths[3], 8, f"R$ {alerta['Valor Inicial (R$)']}", border=1, align="C", fill=fill_row)
         pdf.cell(col_widths[4], 8, f"R$ {alerta['Limite 40% (R$)']}", border=1, align="C", fill=fill_row)
         
-        # --- CÉLULA DO LANCE: TAMANHO MAIOR, NEGRITO E COR DE DESTAQUE ---
-        pdf.set_font("helvetica", "B", 10) # Aumenta para 10pt e ativa o Negrito
-        
+        # Destaque do Lance
+        pdf.set_font("helvetica", "B", 10)
         if is_acima:
-            # Mantém o fundo vermelho da linha inteira
             pdf.set_fill_color(*bg_vermelho_linha)
-            pdf.cell(col_widths[5], 8, f"R$ {alerta['Lance (R$)']}", border=1, align="C", fill=True)
         else:
-            # Destaca apenas a célula do lance com fundo amarelo amigável
             pdf.set_fill_color(*bg_amarelo_lance)
-            pdf.cell(col_widths[5], 8, f"R$ {alerta['Lance (R$)']}", border=1, align="C", fill=True)
             
-        # Restaura tamanho e estilo para a última coluna
+        pdf.cell(col_widths[5], 8, f"R$ {alerta['Lance (R$)']}", border=1, align="C", fill=True)
+            
+        # Restaura a fonte
         pdf.set_font("helvetica", "", 8)
-        
+        if is_acima:
+            pdf.set_fill_color(*bg_vermelho_linha)
+            
         dif = str(alerta['Diferença / Desconto']).encode('latin-1', 'replace').decode('latin-1')
         pdf.cell(col_widths[6], 8, dif, border=1, align="C", fill=fill_row)
         pdf.ln()
@@ -147,6 +148,7 @@ if uploaded_file is not None:
         lances_acima = []
         descontos_excessivos = []
         todos_alertas = []
+        conferencia_geral = [] # Nova lista para armazenar TODOS os itens
         
         coluna_desc = '--------------------------------- D i s c r i m i n a ç ã o ---------------------------------'
         
@@ -159,11 +161,15 @@ if uploaded_file is not None:
                 
                 descricao = str(row[coluna_desc])[:80].replace('\n', ' ') + "..." if coluna_desc in row else "Sem descrição"
                 
+                status_item = "OK"
+                desconto_perc = ((vlr_unit - lance) / vlr_unit) * 100 if vlr_unit > 0 else 0
+                
                 # Regra 1: Lance MAIOR que o Valor Inicial
                 if lance > vlr_unit:
+                    status_item = "ACIMA DO VALOR"
                     dados_alerta = {
                         "Item": item,
-                        "Tipo de Alerta": "ACIMA DO VALOR",
+                        "Tipo de Alerta": status_item,
                         "Descrição": descricao,
                         "Valor Inicial (R$)": round(vlr_unit, 4),
                         "Limite 40% (R$)": round(limite_minimo, 4),
@@ -172,14 +178,13 @@ if uploaded_file is not None:
                     }
                     lances_acima.append(dados_alerta)
                     todos_alertas.append(dados_alerta)
-                    continue
                     
                 # Regra 2: Desconto de MAIS DE 40%
-                if lance < limite_minimo:
-                    desconto_perc = ((vlr_unit - lance) / vlr_unit) * 100
+                elif lance < limite_minimo:
+                    status_item = "DESCONTO > 40%"
                     dados_alerta = {
                         "Item": item,
-                        "Tipo de Alerta": "DESCONTO > 40%",
+                        "Tipo de Alerta": status_item,
                         "Descrição": descricao,
                         "Valor Inicial (R$)": round(vlr_unit, 4),
                         "Limite 40% (R$)": round(limite_minimo, 4),
@@ -188,6 +193,17 @@ if uploaded_file is not None:
                     }
                     descontos_excessivos.append(dados_alerta)
                     todos_alertas.append(dados_alerta)
+                
+                # Adiciona na lista geral independentemente de ter alerta ou não
+                conferencia_geral.append({
+                    "Item": item,
+                    "Status": status_item,
+                    "Descrição": descricao,
+                    "Valor Inicial (R$)": round(vlr_unit, 4),
+                    "Limite 40% (R$)": round(limite_minimo, 4),
+                    "Lance (R$)": round(lance, 4),
+                    "Desconto Aplicado (%)": f"{desconto_perc:.1f}%"
+                })
                     
             except (ValueError, TypeError):
                 continue
@@ -195,53 +211,80 @@ if uploaded_file is not None:
                 st.error(f"Erro: Coluna {e} não encontrada. O arquivo não está no padrão esperado.")
                 st.stop()
                 
-        # --- 3. EXIBIÇÃO E DOWNLOAD ---
+        # --- 3. EXIBIÇÃO EM ABAS E DOWNLOAD ---
         st.divider()
-        st.subheader("Resultados da Conferência")
         
-        col1, col2 = st.columns(2)
-        col1.metric("Lances ACIMA do Valor Inicial", len(lances_acima))
-        col2.metric("Lances com Desconto > 40%", len(descontos_excessivos))
+        # Cria as duas abas
+        aba_alertas, aba_geral = st.tabs(["🚨 Alertas Encontrados", "📋 Conferência Geral (Todos os Itens)"])
         
-        if todos_alertas:
-            col_down1, col_down2 = st.columns(2)
+        with aba_alertas:
+            col1, col2 = st.columns(2)
+            col1.metric("Lances ACIMA do Valor Inicial", len(lances_acima))
+            col2.metric("Lances com Desconto > 40%", len(descontos_excessivos))
             
-            # Botão CSV
-            df_export = pd.DataFrame(todos_alertas)
-            csv_export = df_export.to_csv(index=False, sep=';', decimal=',').encode('utf-8-sig')
-            with col_down1:
-                st.download_button(
-                    label="📥 Baixar em Excel (CSV)",
-                    data=csv_export,
-                    file_name="alertas_conferencia.csv",
-                    mime="text/csv",
-                    use_container_width=True
-                )
+            # Se existirem alertas
+            if todos_alertas:
+                col_down1, col_down2 = st.columns(2)
+                df_export = pd.DataFrame(todos_alertas)
+                csv_export = df_export.to_csv(index=False, sep=';', decimal=',').encode('utf-8-sig')
+                
+                with col_down1:
+                    st.download_button(
+                        label="📥 Baixar Alertas em Excel (CSV)",
+                        data=csv_export,
+                        file_name="alertas_conferencia.csv",
+                        mime="text/csv",
+                        use_container_width=True
+                    )
+                with col_down2:
+                    pdf_data = gerar_pdf(todos_alertas, info_pregao, info_emissao)
+                    st.download_button(
+                        label="📄 Baixar Relatório de Alertas em PDF",
+                        data=pdf_data,
+                        file_name="alertas_conferencia.pdf",
+                        mime="application/pdf",
+                        use_container_width=True
+                    )
+                st.write("")
+                
+                if lances_acima:
+                    st.error("🚨 Itens com Lance MAIOR que o Valor Inicial:")
+                    st.dataframe(pd.DataFrame(lances_acima).drop(columns=["Tipo de Alerta"]), use_container_width=True)
+                    
+                if descontos_excessivos:
+                    st.warning("⚠️ Itens com Desconto EXCESSIVO (Maior que 40% em relação ao Valor Inicial):")
+                    st.dataframe(pd.DataFrame(descontos_excessivos).drop(columns=["Tipo de Alerta"]), use_container_width=True)
             
-            # Botão PDF
-            with col_down2:
-                pdf_data = gerar_pdf(todos_alertas, info_pregao, info_emissao)
+            # Se estiver TUDO CERTO
+            else:
+                st.success("✅ Tudo certo! Nenhum alerta de valor ou desconto encontrado neste arquivo.")
+                st.balloons()
+                
+                # Novo botão de PDF para quando está tudo OK
+                pdf_ok_data = gerar_pdf([], info_pregao, info_emissao)
                 st.download_button(
-                    label="📄 Baixar Relatório em PDF",
-                    data=pdf_data,
-                    file_name="alertas_conferencia.pdf",
+                    label="📄 Baixar Relatório de Aprovação (PDF)",
+                    data=pdf_ok_data,
+                    file_name="relatorio_aprovado.pdf",
                     mime="application/pdf",
-                    use_container_width=True
+                    type="primary"
                 )
+
+        with aba_geral:
+            st.subheader("Análise de Todos os Itens do Arquivo")
+            st.write(f"Total de itens processados: **{len(conferencia_geral)}**")
             
-            st.write("")
-        
-        if lances_acima:
-            st.error("🚨 Itens com Lance MAIOR que o Valor Inicial:")
-            st.dataframe(pd.DataFrame(lances_acima).drop(columns=["Tipo de Alerta"]), use_container_width=True)
+            df_geral = pd.DataFrame(conferencia_geral)
+            st.dataframe(df_geral, use_container_width=True)
             
-        if descontos_excessivos:
-            st.warning("⚠️ Itens com Desconto EXCESSIVO (Maior que 40% em relação ao Valor Inicial):")
-            st.dataframe(pd.DataFrame(descontos_excessivos).drop(columns=["Tipo de Alerta"]), use_container_width=True)
-            
-        if not todos_alertas:
-            st.success("✅ Tudo certo! Nenhum alerta de valor ou desconto encontrado neste arquivo.")
-            st.balloons()
+            # Botão extra para baixar a tabela completa em CSV
+            csv_geral_export = df_geral.to_csv(index=False, sep=';', decimal=',').encode('utf-8-sig')
+            st.download_button(
+                label="📥 Baixar Tabela Completa (Excel/CSV)",
+                data=csv_geral_export,
+                file_name="conferencia_completa.csv",
+                mime="text/csv"
+            )
             
     except Exception as e:
         st.error(f"Ocorreu um erro ao tentar processar o arquivo: {e}")
