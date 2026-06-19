@@ -15,13 +15,20 @@ def resetar_app():
     st.session_state["file_uploader_key"] += 1
 
 def gerar_pdf(alertas, info_pregao, info_emissao):
-    """Gera um arquivo PDF com a tabela de inconsistências."""
+    """Gera um arquivo PDF formatado com destaques visuais coloridos."""
     pdf = FPDF(orientation="L", unit="mm", format="A4") # Formato Paisagem
     pdf.add_page()
     
+    # 1. Adiciona a Logo no PDF se ela existir no repositório
+    if os.path.exists("logo_drogafonte (1).png"):
+        pdf.image("logo_drogafonte (1).png", x=10, y=10, w=40)
+        pdf.ln(14) # Espaço para não sobrepor o título
+    else:
+        pdf.ln(5)
+        
     # Título do Relatório
     pdf.set_font("helvetica", "B", 14)
-    pdf.cell(0, 10, "Relatório de Conferência de Lances - Drogafonte", align="C", new_x="LMARGIN", new_y="NEXT")
+    pdf.cell(0, 10, "Relatório de Conferência de Lances", align="C", new_x="LMARGIN", new_y="NEXT")
     
     # Informações do Pregão
     pdf.set_font("helvetica", "", 10)
@@ -33,34 +40,69 @@ def gerar_pdf(alertas, info_pregao, info_emissao):
     
     # Cabeçalho da Tabela
     pdf.set_font("helvetica", "B", 9)
+    # Definição das cores do cabeçalho (Cinza Escuro)
+    pdf.set_fill_color(230, 230, 230)
+    
     col_widths = [15, 35, 105, 25, 25, 25, 40]
     headers = ["Item", "Alerta", "Descrição", "Vlr Inicial", "Lim. 40%", "Lance", "Diferença"]
     
     for i, h in enumerate(headers):
-        pdf.cell(col_widths[i], 8, h, border=1, align="C")
+        pdf.cell(col_widths[i], 8, h, border=1, align="C", fill=True)
     pdf.ln()
     
+    # Definição das Cores de Destaque (RGB)
+    bg_vermelho_linha = (255, 214, 214)  # Linha toda para Lance > Valor Inicial
+    bg_amarelo_lance = (255, 243, 205)   # Célula do lance para Desconto > 40%
+    
     # Linhas da Tabela
-    pdf.set_font("helvetica", "", 8)
     for alerta in alertas:
+        is_acima = alerta["Tipo de Alerta"] == "ACIMA DO VALOR"
+        
+        # Define se a linha inteira terá preenchimento de fundo
+        if is_acima:
+            pdf.set_fill_color(*bg_vermelho_linha)
+            fill_row = True
+        else:
+            fill_row = False
+            
+        # Fonte padrão para as células normais
+        pdf.set_font("helvetica", "", 8)
+        
+        pdf.cell(col_widths[0], 8, str(alerta["Item"]), border=1, align="C", fill=fill_row)
+        
+        tipo_alerta_safe = alerta["Tipo de Alerta"].encode('latin-1', 'replace').decode('latin-1')
+        pdf.cell(col_widths[1], 8, tipo_alerta_safe, border=1, align="C", fill=fill_row)
+        
         desc = alerta["Descrição"]
         desc = (desc[:60] + "...") if len(desc) > 60 else desc
         desc = desc.encode('latin-1', 'replace').decode('latin-1')
+        pdf.cell(col_widths[2], 8, desc, border=1, fill=fill_row)
         
-        pdf.cell(col_widths[0], 8, str(alerta["Item"]), border=1, align="C")
-        pdf.cell(col_widths[1], 8, alerta["Tipo de Alerta"], border=1, align="C")
-        pdf.cell(col_widths[2], 8, desc, border=1)
-        pdf.cell(col_widths[3], 8, f"R$ {alerta['Valor Inicial (R$)']}", border=1, align="C")
-        pdf.cell(col_widths[4], 8, f"R$ {alerta['Limite 40% (R$)']}", border=1, align="C")
-        pdf.cell(col_widths[5], 8, f"R$ {alerta['Lance (R$)']}", border=1, align="C")
+        pdf.cell(col_widths[3], 8, f"R$ {alerta['Valor Inicial (R$)']}", border=1, align="C", fill=fill_row)
+        pdf.cell(col_widths[4], 8, f"R$ {alerta['Limite 40% (R$)']}", border=1, align="C", fill=fill_row)
+        
+        # --- CÉLULA DO LANCE: TAMANHO MAIOR, NEGRITO E COR DE DESTAQUE ---
+        pdf.set_font("helvetica", "B", 10) # Aumenta para 10pt e ativa o Negrito
+        
+        if is_acima:
+            # Mantém o fundo vermelho da linha inteira
+            pdf.set_fill_color(*bg_vermelho_linha)
+            pdf.cell(col_widths[5], 8, f"R$ {alerta['Lance (R$)']}", border=1, align="C", fill=True)
+        else:
+            # Destaca apenas a célula do lance com fundo amarelo amigável
+            pdf.set_fill_color(*bg_amarelo_lance)
+            pdf.cell(col_widths[5], 8, f"R$ {alerta['Lance (R$)']}", border=1, align="C", fill=True)
+            
+        # Restaura tamanho e estilo para a última coluna
+        pdf.set_font("helvetica", "", 8)
         
         dif = str(alerta['Diferença / Desconto']).encode('latin-1', 'replace').decode('latin-1')
-        pdf.cell(col_widths[6], 8, dif, border=1, align="C")
+        pdf.cell(col_widths[6], 8, dif, border=1, align="C", fill=fill_row)
         pdf.ln()
         
     return bytes(pdf.output())
 
-# --- CABEÇALHO COM LOGO ---
+# --- CABEÇALHO DA TELA COM LOGO ---
 if os.path.exists("logo_drogafonte (1).png"):
     st.image("logo_drogafonte (1).png", width=250)
 else:
@@ -113,7 +155,7 @@ if uploaded_file is not None:
                 vlr_unit = float(row['Vlr. Unit.'])
                 lance = float(row['Lance'])
                 item = row['Item']
-                limite_minimo = vlr_unit * 0.60 # Calcula o limite de 40%
+                limite_minimo = vlr_unit * 0.60
                 
                 descricao = str(row[coluna_desc])[:80].replace('\n', ' ') + "..." if coluna_desc in row else "Sem descrição"
                 
@@ -161,7 +203,6 @@ if uploaded_file is not None:
         col1.metric("Lances ACIMA do Valor Inicial", len(lances_acima))
         col2.metric("Lances com Desconto > 40%", len(descontos_excessivos))
         
-        # Área de Botões de Download
         if todos_alertas:
             col_down1, col_down2 = st.columns(2)
             
