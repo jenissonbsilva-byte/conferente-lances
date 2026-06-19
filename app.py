@@ -5,15 +5,15 @@ import pandas as pd
 st.set_page_config(page_title="Conferente de Lances", page_icon="📊", layout="wide")
 
 st.title("📊 Conferente de Lances de Pregão")
-st.write("Faça o upload do relatório (CSV) para identificar automaticamente lances com descontos acima de 40% ou que ultrapassaram o valor unitário estimado.")
+st.write("Faça o upload do relatório em Excel (.xls ou .xlsx) para identificar automaticamente lances com descontos acima de 40% ou que ultrapassaram o valor unitário estimado.")
 
-# Widget para upload do arquivo
-uploaded_file = st.file_uploader("Selecione o arquivo CSV do relatório", type=["csv"])
+# Widget para upload do arquivo (AGORA PARA EXCEL)
+uploaded_file = st.file_uploader("Selecione o arquivo Excel do relatório", type=["xls", "xlsx"])
 
 if uploaded_file is not None:
     try:
-        # Lê o CSV pulando as 6 primeiras linhas de cabeçalho
-        df = pd.read_csv(uploaded_file, skiprows=6)
+        # Lê o Excel pulando as 6 primeiras linhas de cabeçalho
+        df = pd.read_excel(uploaded_file, skiprows=6)
         df.columns = df.columns.str.strip()
         
         # Listas para armazenar as inconsistências encontradas
@@ -65,7 +65,7 @@ if uploaded_file is not None:
                 # Ignora linhas de rodapé ou vazias que não contêm números
                 continue
             except KeyError as e:
-                st.error(f"Erro de formatação: A coluna {e} não foi encontrada no arquivo.")
+                st.error(f"Erro de formatação: A coluna {e} não foi encontrada no arquivo. Verifique se o arquivo segue o padrão de colunas.")
                 st.stop()
                 
         # --- EXIBIÇÃO DOS RESULTADOS NA TELA ---
@@ -94,4 +94,4 @@ if uploaded_file is not None:
             
     except Exception as e:
         st.error(f"Ocorreu um erro ao tentar processar o arquivo: {e}")
-        st.info("Verifique se o arquivo enviado segue exatamente o mesmo padrão de colunas e cabeçalho do modelo.")
+        st.info("Verifique se você enviou o arquivo correto (.xls ou .xlsx) e se ele segue o modelo de cabeçalho.")
